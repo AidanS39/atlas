@@ -41,3 +41,21 @@ yarn-error.log*
 next-env.d.ts
 
 *test*
+
+# -----------------------
+# Python backend
+# -----------------------
+
+# Virtual environments
+backend/venv/
+venv/
+.env/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# FastAPI / Python misc
+*.sqlite3
