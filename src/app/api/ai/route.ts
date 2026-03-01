@@ -3,7 +3,7 @@ import { NextRequest } from "next/server";
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY!);
 
-const SYSTEM_PROMPT = `You are an AI research analyst embedded in "Stellar Papers", a citation graph explorer. 
+const SYSTEM_PROMPT = `You are an AI research analyst embedded in "Stellar Papers", a citation graph explorer.
 You analyze academic paper networks to help researchers understand:
 
 1. **High-density areas (Saturation)**: Topics with many papers and citations, indicating well-explored research.
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
             });
         }
 
-        const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
 
         // Build context from graph data
         let contextBlock = "";
