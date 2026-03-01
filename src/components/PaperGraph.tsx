@@ -417,8 +417,8 @@ export default function PaperGraph() {
     useEffect(() => {
         if (!fgRef.current || graphData.nodes.length === 0) return;
 
-        const ATTRACT_STRENGTH = 0.25;
-        const REPEL_STRENGTH   = 0.85;   // was 0.35
+        const ATTRACT_STRENGTH = 0.01;
+        const REPEL_STRENGTH   = 2.85;   // was 0.35
         const REPEL_RADIUS     = 160;
 
         function colorClusterForce(alpha: number) {
