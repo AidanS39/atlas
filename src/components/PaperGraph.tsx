@@ -49,8 +49,16 @@ interface GraphNode {
     citations: number;
     fields: string[];
     abstract: string;
+    doi?: string;
+    authors?: string[];
+    institution?: string;
+    topic?: string;
+    percentile?: number;
+    publishedDate?: string;
+    openAlexId?: string;
     color: string;
     isPrimary: boolean;
+    degree?: number;
     // injected by force-graph at runtime
     x?: number;
     y?: number;
@@ -92,11 +100,47 @@ const FIELD_COLORS: Record<string, string> = {
     Linguistics: "#818cf8",
     "Environmental Science": "#4ade80",
 };
+
+// Vibrant palette to assign to any newly encountered fields
+const DYNAMIC_PALETTE = [
+    "#ef4444",
+    "#f97316",
+    "#f59e0b",
+    "#84cc16",
+    "#22c55e",
+    "#10b981",
+    "#14b8a6",
+    "#06b6d4",
+    "#0ea5e9",
+    "#3b82f6",
+    "#6366f1",
+    "#8b5cf6",
+    "#a855f7",
+    "#d946ef",
+    "#ec4899",
+    "#f43f5e",
+];
+
+const dynamicFieldColors = new Map<string, string>();
 const DEFAULT_COLOR = "#7dd3fc";
 
 function fieldColor(fields: string[]): string {
     if (!fields || !fields.length) return DEFAULT_COLOR;
-    return FIELD_COLORS[fields[0]] ?? DEFAULT_COLOR;
+    const primaryField = fields[0];
+
+    const matchKey = Object.keys(FIELD_COLORS).find(
+        (k) => k.toLowerCase() === primaryField.toLowerCase(),
+    );
+    if (matchKey) return FIELD_COLORS[matchKey];
+
+    // Dynamically assign a color from the palette if we haven't seen this field before
+    const normalizedDynamic = primaryField.toLowerCase();
+    if (!dynamicFieldColors.has(normalizedDynamic)) {
+        const nextColor = DYNAMIC_PALETTE[dynamicFieldColors.size % DYNAMIC_PALETTE.length];
+        dynamicFieldColors.set(normalizedDynamic, nextColor);
+    }
+
+    return dynamicFieldColors.get(normalizedDynamic)!;
 }
 
 function hexToRgb(hex: string): { r: number; g: number; b: number } {
@@ -108,11 +152,9 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
     };
 }
 
-// Shared radius logic — used by both draw and pointer-area so hover is pixel-perfect
-function getNodeRadius(citations: number, isPrimary: boolean, isHovered = false): number {
-    const base = isPrimary
-        ? Math.max(3, Math.min(10, 3 + Math.log1p(citations) * 0.9))
-        : Math.max(2, Math.min(7, 2 + Math.log1p(citations) * 0.6));
+// Shared radius logic — sizes based on network degree instead of citations
+function getNodeRadius(degree: number, isHovered = false): number {
+    const base = Math.max(3, Math.min(22, 2.5 + Math.sqrt(degree) * 1.8));
     return isHovered ? base * 1.5 : base;
 }
 
@@ -391,10 +433,12 @@ async function fetchGraph(
     maxNodes: number,
     minYear: number,
     minCitations: number,
+    authorFilter: string,
+    fieldFilter: string,
 ): Promise<GraphData> {
     return USE_MOCK
         ? fetchMockGraph(query, maxNodes, minYear, minCitations)
-        : fetchNeo4jGraph(query, maxNodes, minYear, minCitations);
+        : fetchNeo4jGraph(query, maxNodes, minYear, minCitations, authorFilter, fieldFilter);
 }
 
 async function fetchMockGraph(
@@ -428,12 +472,16 @@ async function fetchNeo4jGraph(
     maxNodes: number,
     minYear: number,
     minCitations: number,
+    authorFilter: string,
+    fieldFilter: string,
 ): Promise<GraphData> {
     const params = new URLSearchParams({
         limit: String(maxNodes),
     });
     if (query.trim()) params.set("keyword", query.trim());
     if (minYear > 0) params.set("publication_year_start", String(minYear));
+    if (authorFilter.trim()) params.set("author", authorFilter.trim());
+    if (fieldFilter.trim()) params.set("field", fieldFilter.trim());
     const res = await fetch(`/api/graph?${params}`);
     if (!res.ok) {
         const err = await res.json().catch(() => ({ error: res.statusText }));
@@ -448,6 +496,13 @@ async function fetchNeo4jGraph(
         citations: n.metadata?.cited_by_count ?? 0,
         fields: n.metadata?.field ? [n.metadata.field] : [],
         abstract: n.metadata?.keywords?.join(", ") || "",
+        authors: n.metadata?.authorships || [],
+        institution: n.metadata?.institution || undefined,
+        topic: n.metadata?.primary_topic || undefined,
+        percentile: n.metadata?.citation_normalized_percentile ?? undefined,
+        publishedDate: n.metadata?.publication_date || undefined,
+        doi: n.metadata?.doi ?? undefined,
+        openAlexId: n.metadata?.open_alex_id || n.id,
         color: fieldColor(n.metadata?.field ? [n.metadata.field] : []),
         isPrimary: true,
     }));
@@ -773,6 +828,25 @@ export default function PaperGraph() {
             : "Connected to Neo4j — enter a topic to explore",
     );
     const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
+    // Pre-calculate adjacency lists when graph data changes for fast neighbour lookups
+    const adjacencyList = useMemo(() => {
+        const adj = new Map<string, Set<string>>();
+        graphData.nodes.forEach((n) => adj.set(n.id, new Set()));
+        graphData.links.forEach((l) => {
+            const sourceId = typeof l.source === "string" ? l.source : l.source.id;
+            const targetId = typeof l.target === "string" ? l.target : l.target.id;
+            adj.get(sourceId)?.add(targetId);
+            adj.get(targetId)?.add(sourceId);
+        });
+
+        // Attach degree to nodes for sizing
+        graphData.nodes.forEach((n) => {
+            n.degree = adj.get(n.id)?.size || 0;
+        });
+
+        return adj;
+    }, [graphData]);
+
     const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
     const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
@@ -780,6 +854,8 @@ export default function PaperGraph() {
     const [maxNodes, setMaxNodes] = useState(50);
     const [minYear, setMinYear] = useState(2010);
     const [minCitations, setMinCitations] = useState(0);
+    const [authorFilter, setAuthorFilter] = useState("");
+    const [fieldFilter, setFieldFilter] = useState("");
     const [aiOpen, setAiOpen] = useState(false);
     const [savedOpen, setSavedOpen] = useState(false);
     const [savedRefreshKey, setSavedRefreshKey] = useState(0);
@@ -801,9 +877,9 @@ export default function PaperGraph() {
     useEffect(() => {
         if (!fgRef.current || graphData.nodes.length === 0) return;
 
-        const ATTRACT_STRENGTH = 0.01;
-        const REPEL_STRENGTH = 2.85; // was 0.35
-        const REPEL_RADIUS = 160;
+        const ATTRACT_STRENGTH = 0.005;
+        const REPEL_STRENGTH = 1.5; // was 2.85
+        const REPEL_RADIUS = 100;
 
         function colorClusterForce(alpha: number) {
             const nodes = graphData.nodes as Array<GraphNode & { vx?: number; vy?: number }>;
@@ -821,8 +897,8 @@ export default function PaperGraph() {
 
                     // ── Collision: push apart if nodes overlap ──────────────
                     const minDist =
-                        getNodeRadius(a.citations ?? 0, a.isPrimary ?? false) +
-                        getNodeRadius(b.citations ?? 0, b.isPrimary ?? false) +
+                        getNodeRadius(a.degree ?? 0, false) +
+                        getNodeRadius(b.degree ?? 0, false) +
                         2; // 2px gap
                     if (dist < minDist) {
                         const overlap = ((minDist - dist) / dist) * 1.2; // was 0.5
@@ -906,29 +982,38 @@ export default function PaperGraph() {
         if (loading) return;
         setLoading(true);
         setSelectedNode(null);
-        setStatus(query.trim() ? "Scanning the cosmos…" : "Loading papers…");
+        setStatus(
+            query.trim() || authorFilter.trim() || fieldFilter.trim()
+                ? "Scanning the cosmos…"
+                : "Loading papers…",
+        );
         setGraphData({ nodes: [], links: [] });
         try {
-            const data = await fetchGraph(query, maxNodes, minYear, minCitations);
+            const data = await fetchGraph(
+                query,
+                maxNodes,
+                minYear,
+                minCitations,
+                authorFilter,
+                fieldFilter,
+            );
             if (data.nodes.length === 0) {
                 setStatus("No results found. Try a different query.");
                 setLoading(false);
                 return;
             }
             const fields = [...new Set(data.nodes.flatMap((n) => n.fields))].filter(Boolean);
-            setFieldsPresent(fields.slice(0, 12));
+            setFieldsPresent(fields);
             setTimeout(() => {
                 setGraphData(data);
-                setStatus(
-                    `${data.nodes.length} nodes · ${data.links.length} connections${USE_MOCK ? " (mock)" : " (neo4j)"}`,
-                );
+                setStatus(`${data.nodes.length} nodes · ${data.links.length} connections`);
                 setLoading(false);
             }, 60);
         } catch (e) {
             setStatus(`Error: ${(e as Error).message}`);
             setLoading(false);
         }
-    }, [query, maxNodes, minYear, minCitations, loading]);
+    }, [query, maxNodes, minYear, minCitations, authorFilter, fieldFilter, loading]);
 
     // Auto-load papers on mount
     useEffect(() => {
@@ -944,50 +1029,51 @@ export default function PaperGraph() {
                 if (n.x == null || n.y == null) return;
                 const { x, y, color = DEFAULT_COLOR, citations = 0, isPrimary = false } = n;
                 const isHov = hoveredRef.current?.id === n.id;
-                const radius = getNodeRadius(citations, isPrimary, isHov);
+                const isSelected = selectedNode?.id === n.id;
+                let isConnectedToSelected = false;
+                if (selectedNode) {
+                    isConnectedToSelected = adjacencyList.get(selectedNode.id)?.has(n.id) || false;
+                }
+
+                // If a node is selected, dim nodes that are neither selected nor connected
+                const opacity = selectedNode && !isSelected && !isConnectedToSelected ? 0.2 : 1;
+                const radius = getNodeRadius(n.degree ?? 0, isHov || isSelected);
                 const { r, g, b } = hexToRgb(color);
 
-                const sphere = ctx.createRadialGradient(
-                    x - radius * 0.3,
-                    y - radius * 0.3,
+                const gradient = ctx.createRadialGradient(x, y, 0, x, y, radius);
+                gradient.addColorStop(
                     0,
-                    x,
-                    y,
-                    radius,
+                    `rgba(${Math.min(255, r + 40)},${Math.min(255, g + 40)},${Math.min(
+                        255,
+                        b + 40,
+                    )},${1 * opacity})`,
                 );
-                sphere.addColorStop(0, "rgba(255,255,255,0.92)");
-                sphere.addColorStop(0.4, `rgba(${r},${g},${b},1)`);
-                sphere.addColorStop(
+                gradient.addColorStop(0.7, `rgba(${r},${g},${b},${1 * opacity})`);
+                gradient.addColorStop(
                     1,
-                    `rgba(${Math.max(0, r - 55)},${Math.max(0, g - 55)},${Math.max(0, b - 55)},0.8)`,
+                    `rgba(${Math.max(0, r - 30)},${Math.max(0, g - 30)},${Math.max(
+                        0,
+                        b - 30,
+                    )},${1 * opacity})`,
                 );
+
                 ctx.beginPath();
                 ctx.arc(x, y, radius, 0, Math.PI * 2);
-                ctx.fillStyle = sphere;
+                ctx.fillStyle = gradient;
                 ctx.fill();
 
-                if (isPrimary) {
-                    ctx.beginPath();
-                    ctx.arc(x, y, radius + 2.5, 0, Math.PI * 2);
-                    ctx.strokeStyle = `rgba(${r},${g},${b},0.55)`;
-                    ctx.lineWidth = 0.9;
-                    ctx.stroke();
-                }
+                // Subtle border for definition
+                ctx.lineWidth = 0.5 * (isSelected ? 2 : 1);
+                ctx.strokeStyle = `rgba(${r},${g},${b},${opacity})`;
+                ctx.stroke();
 
-                if (globalScale > 2 || isHov) {
-                    const label = n.title.length > 40 ? n.title.slice(0, 40) + "…" : n.title;
-                    const fs = Math.max(2.5, 11 / globalScale);
-                    ctx.font = `${isHov ? "700" : "400"} ${fs}px "Space Mono", monospace`;
-                    ctx.textAlign = "center";
-                    ctx.textBaseline = "bottom";
-                    ctx.fillStyle = isHov ? "#ffffff" : `rgba(${r},${g},${b},0.88)`;
-                    ctx.fillText(label, x, y - radius - 4);
-                }
+                // Selected node label is drawn independently so it sits explicitly above the canvas elements
+                if (isSelected) return;
             } catch (_) {
                 /* swallow */
             }
         },
-        [],
+        [adjacencyList, selectedNode],
     );
 
     // Pixel-perfect hover hit area — matches exactly what drawNode renders
@@ -995,7 +1081,7 @@ export default function PaperGraph() {
         (node: object, color: string, ctx: CanvasRenderingContext2D) => {
             const n = node as GraphNode;
             if (n.x == null || n.y == null) return;
-            const radius = getNodeRadius(n.citations ?? 0, n.isPrimary ?? false);
+            const radius = getNodeRadius(n.degree ?? 0, false);
             ctx.beginPath();
             ctx.arc(n.x, n.y, radius, 0, Math.PI * 2);
             ctx.fillStyle = color;
@@ -1004,30 +1090,36 @@ export default function PaperGraph() {
         [],
     );
 
-    const drawLink = useCallback((link: object, ctx: CanvasRenderingContext2D) => {
-        try {
-            const l = link as { source: GraphNode; target: GraphNode };
-            const { source: s, target: t } = l;
-            if (!s || !t || s.x == null || t.x == null) return;
-            const dx = t.x! - s.x!,
-                dy = t.y! - s.y!;
-            if (dx * dx + dy * dy < 1) return;
-            const { r, g, b } = hexToRgb(s.color || DEFAULT_COLOR);
-            ctx.beginPath();
-            ctx.moveTo(s.x!, s.y!);
-            ctx.lineTo(t.x!, t.y!);
-            ctx.strokeStyle = `rgba(${r},${g},${b},0.22)`;
-            ctx.lineWidth = 0.7;
-            ctx.stroke();
-        } catch (_) {
-            /* swallow */
-        }
-    }, []);
+    const drawLink = useCallback(
+        (link: object, ctx: CanvasRenderingContext2D) => {
+            try {
+                const l = link as { source: GraphNode; target: GraphNode };
+                const { source: s, target: t } = l;
+                if (!s || !t || s.x == null || t.x == null) return;
+                const dx = t.x! - s.x!,
+                    dy = t.y! - s.y!;
+                if (dx * dx + dy * dy < 1) return;
+                const snId = selectedNode?.id;
+                const isConnectedToSelected = snId && (s.id === snId || t.id === snId);
 
-    const particleColor = useCallback((link: object) => {
-        const l = link as { source?: GraphNode };
-        return l.source?.color || DEFAULT_COLOR;
-    }, []);
+                // If a node is selected, fade out links not connected to it
+                const opacity = snId && !isConnectedToSelected ? 0.05 : 0.22;
+                const highlightMultiplier = isConnectedToSelected ? 2.5 : 1;
+                const lineWidth = 0.7 * highlightMultiplier;
+
+                const { r, g, b } = hexToRgb(s.color || DEFAULT_COLOR);
+                ctx.beginPath();
+                ctx.moveTo(s.x!, s.y!);
+                ctx.lineTo(t.x!, t.y!);
+                ctx.strokeStyle = `rgba(${r},${g},${b},${opacity * highlightMultiplier})`;
+                ctx.lineWidth = lineWidth;
+                ctx.stroke();
+            } catch (_) {
+                /* swallow */
+            }
+        },
+        [selectedNode],
+    );
 
     // ── Slider config ───────────────────────────────────────────────────────
     const sliders = [
@@ -1075,7 +1167,8 @@ export default function PaperGraph() {
                         onClick={() => setSavedOpen(!savedOpen)}
                         title="Saved Papers"
                         style={{
-                            padding: "6px 10px",
+                            height: "36px",
+                            padding: "0 10px",
                             borderRadius: 8,
                             border: `1px solid ${isDark ? "rgba(79,195,247,0.3)" : "rgba(2,132,199,0.25)"}`,
                             background: savedOpen
@@ -1089,17 +1182,19 @@ export default function PaperGraph() {
                             cursor: "pointer",
                             display: "flex",
                             alignItems: "center",
+                            justifyContent: "center",
                             gap: 5,
                         }}
                     >
-                        <HiBookmark size={15} />
+                        <HiBookmark size={18} />
                     </button>
                 )}
                 <button
                     onClick={() => setAiOpen(!aiOpen)}
                     title="AI Analyst"
                     style={{
-                        padding: "6px 10px",
+                        height: "36px",
+                        padding: "0 10px",
                         borderRadius: 8,
                         border: `1px solid ${isDark ? "rgba(79,195,247,0.3)" : "rgba(2,132,199,0.25)"}`,
                         background: aiOpen
@@ -1115,6 +1210,7 @@ export default function PaperGraph() {
                         fontSize: 13,
                         display: "flex",
                         alignItems: "center",
+                        justifyContent: "center",
                         gap: 5,
                     }}
                 >
@@ -1138,15 +1234,26 @@ export default function PaperGraph() {
                     linkCanvasObjectMode={() => "replace"}
                     onNodeHover={onNodeHover}
                     nodeLabel=""
-                    linkDirectionalParticles={2}
-                    linkDirectionalParticleWidth={1.2}
-                    linkDirectionalParticleColor={particleColor}
-                    linkDirectionalParticleSpeed={0.004}
                     cooldownTicks={150}
                     d3AlphaDecay={0.025}
                     d3VelocityDecay={0.35}
                     enableNodeDrag
                     enableZoomInteraction
+                    onRenderFramePost={(ctx, globalScale) => {
+                        if (selectedNode && selectedNode.x != null && selectedNode.y != null) {
+                            const n = selectedNode as GraphNode;
+                            const { x, y } = n;
+                            const label = n.title;
+                            const radius = getNodeRadius(n.degree ?? 0, true);
+                            const scale = 1.5;
+                            const fs = Math.max(2.5, (11 * scale) / globalScale);
+                            ctx.font = `700 ${fs}px "Space Mono", monospace`;
+                            ctx.textAlign = "center";
+                            ctx.textBaseline = "bottom";
+                            ctx.fillStyle = "#ffffff";
+                            ctx.fillText(label, x, y - radius - 4);
+                        }
+                    }}
                 />
             </div>
 
@@ -1171,19 +1278,9 @@ export default function PaperGraph() {
             >
                 <div
                     style={{
-                        fontSize: 10,
-                        letterSpacing: "0.35em",
-                        color: t.accentMuted,
                         fontFamily: '"Orbitron", monospace',
-                        textTransform: "uppercase",
-                    }}
-                >
-                    Research Graph
-                </div>
-                <div
-                    style={{
-                        fontFamily: '"Orbitron", monospace',
-                        fontSize: 20,
+                        fontSize: 28,
+                        textAlign: "center",
                         fontWeight: 900,
                         color: t.textPrimary,
                         lineHeight: 1.1,
@@ -1191,31 +1288,7 @@ export default function PaperGraph() {
                         marginBottom: 2,
                     }}
                 >
-                    STELLAR
-                    <br />
-                    MAPS
-                </div>
-
-                <div
-                    style={{
-                        fontSize: 9,
-                        letterSpacing: "0.12em",
-                        padding: "3px 8px",
-                        borderRadius: 4,
-                        display: "inline-block",
-                        alignSelf: "flex-start",
-                        background: USE_MOCK ? "rgba(251,191,36,0.12)" : "rgba(52,211,153,0.12)",
-                        border: `1px solid ${USE_MOCK ? "rgba(251,191,36,0.35)" : "rgba(52,211,153,0.35)"}`,
-                        color: USE_MOCK
-                            ? isDark
-                                ? "#fbbf24"
-                                : "#b45309"
-                            : isDark
-                              ? "#34d399"
-                              : "#047857",
-                    }}
-                >
-                    {USE_MOCK ? "⚡ MOCK DATA" : "🔗 NEO4J LIVE"}
+                    STELLAR MAPS
                 </div>
 
                 <input
@@ -1231,9 +1304,7 @@ export default function PaperGraph() {
                         fontSize: 12,
                         outline: "none",
                     }}
-                    placeholder={
-                        USE_MOCK ? "Try: transformer, diffusion…" : "Search papers in Neo4j…"
-                    }
+                    placeholder={USE_MOCK ? "Try: transformer, diffusion…" : "Search papers..."}
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && runSearch()}
@@ -1261,6 +1332,8 @@ export default function PaperGraph() {
                         color: t.statusColor,
                         minHeight: 14,
                         lineHeight: 1.5,
+                        textAlign: "center",
+                        width: "100%",
                     }}
                 >
                     {status}
@@ -1320,6 +1393,75 @@ export default function PaperGraph() {
                     </div>
                 ))}
 
+                {!USE_MOCK && (
+                    <>
+                        <div style={{ marginTop: 6 }}>
+                            <div
+                                style={{
+                                    fontSize: 10,
+                                    color: t.textMuted,
+                                    textTransform: "uppercase",
+                                    letterSpacing: "0.08em",
+                                    marginBottom: 5,
+                                }}
+                            >
+                                Author Filter
+                            </div>
+                            <input
+                                type="text"
+                                value={authorFilter}
+                                onChange={(e) => setAuthorFilter(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                                placeholder="Author name..."
+                                style={{
+                                    width: "100%",
+                                    background: "rgba(0,0,0,0.1)",
+                                    border: `1px solid ${t.divider}`,
+                                    borderRadius: 4,
+                                    padding: "6px 8px",
+                                    color: t.textField,
+                                    fontSize: 11,
+                                    fontFamily: "inherit",
+                                    outline: "none",
+                                    boxSizing: "border-box",
+                                }}
+                            />
+                        </div>
+                        <div>
+                            <div
+                                style={{
+                                    fontSize: 10,
+                                    color: t.textMuted,
+                                    textTransform: "uppercase",
+                                    letterSpacing: "0.08em",
+                                    marginBottom: 5,
+                                }}
+                            >
+                                Field Filter
+                            </div>
+                            <input
+                                type="text"
+                                value={fieldFilter}
+                                onChange={(e) => setFieldFilter(e.target.value)}
+                                onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                                placeholder="Field name..."
+                                style={{
+                                    width: "100%",
+                                    background: "rgba(0,0,0,0.1)",
+                                    border: `1px solid ${t.divider}`,
+                                    borderRadius: 4,
+                                    padding: "6px 8px",
+                                    color: t.textField,
+                                    fontSize: 11,
+                                    fontFamily: "inherit",
+                                    outline: "none",
+                                    boxSizing: "border-box",
+                                }}
+                            />
+                        </div>
+                    </>
+                )}
+
                 {fieldsPresent.length > 0 && (
                     <>
                         <hr
@@ -1340,7 +1482,7 @@ export default function PaperGraph() {
                             Fields of Study
                         </div>
                         {fieldsPresent.map((f) => {
-                            const c = FIELD_COLORS[f] ?? DEFAULT_COLOR;
+                            const c = fieldColor([f]);
                             return (
                                 <div
                                     key={f}
@@ -1376,14 +1518,13 @@ export default function PaperGraph() {
                         margin: 0,
                     }}
                 />
-                <div style={{ fontSize: 9, color: t.textFaint, lineHeight: 1.8 }}>
+                <div style={{ fontSize: 12, color: t.textFaint, lineHeight: 1.8 }}>
                     Drag nodes · Scroll to zoom
                     <br />
                     Hover for details · Enter to search
                     {!USE_MOCK && (
                         <>
                             <br />
-                            Backend: /api/graph (Next.js)
                         </>
                     )}
                 </div>
@@ -1421,7 +1562,7 @@ export default function PaperGraph() {
                     <div style={{ fontSize: 10, color: t.textMuted, marginBottom: 3 }}>
                         {hoveredNode.year ? `📅 ${hoveredNode.year}` : ""}
                         {hoveredNode.citations
-                            ? `  ·  ✦ ${hoveredNode.citations.toLocaleString()} citations`
+                            ? `  ✦ ${hoveredNode.citations.toLocaleString()} citations`
                             : ""}
                     </div>
                     {hoveredNode.fields?.length > 0 && (
@@ -1513,13 +1654,13 @@ export default function PaperGraph() {
                 <div
                     style={{
                         position: "absolute",
-                        bottom: 20,
-                        left: 20,
-                        background: t.tooltipBg,
-                        border: `1px solid ${selectedNode.color}66`,
+                        bottom: 80, // Moved up to sit above the stats bar
+                        right: 20, // Moved from left to right
                         borderRadius: 12,
                         padding: "16px",
-                        maxWidth: 320,
+                        maxWidth: 280,
+                        maxHeight: "70vh",
+                        overflowY: "auto",
                         zIndex: 20,
                         boxShadow: `0 8px 32px rgba(0,0,0,0.5), 0 0 24px ${selectedNode.color}33`,
                         fontFamily: '"Space Mono", monospace',
@@ -1541,10 +1682,138 @@ export default function PaperGraph() {
                     <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 12 }}>
                         {selectedNode.year ? `📅 ${selectedNode.year}` : ""}
                         {selectedNode.citations
-                            ? `  ·  ✦ ${selectedNode.citations.toLocaleString()} citations`
+                            ? `  ✦ ${selectedNode.citations.toLocaleString()} citations`
                             : ""}
                     </div>
-                    <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                    {selectedNode.authors && selectedNode.authors.length > 0 && (
+                        <div
+                            style={{
+                                fontSize: 10,
+                                color: t.textFaint,
+                                marginBottom: 8,
+                                lineHeight: 1.4,
+                            }}
+                        >
+                            <strong>Authors:</strong> {selectedNode.authors.slice(0, 5).join(", ")}
+                            {selectedNode.authors.length > 5 ? " et al." : ""}
+                        </div>
+                    )}
+
+                    {selectedNode.institution && (
+                        <div
+                            style={{
+                                fontSize: 10,
+                                color: t.textFaint,
+                                marginBottom: 8,
+                                lineHeight: 1.4,
+                            }}
+                        >
+                            <strong>Institution:</strong> {selectedNode.institution}
+                        </div>
+                    )}
+
+                    {selectedNode.topic && (
+                        <div
+                            style={{
+                                fontSize: 10,
+                                color: t.textFaint,
+                                marginBottom: 8,
+                                lineHeight: 1.4,
+                            }}
+                        >
+                            <strong>Topic:</strong> {selectedNode.topic}
+                        </div>
+                    )}
+
+                    {selectedNode.percentile != null && (
+                        <div
+                            style={{
+                                fontSize: 10,
+                                color: t.textFaint,
+                                marginBottom: 8,
+                                lineHeight: 1.4,
+                            }}
+                        >
+                            <strong>Citation Percentile:</strong>{" "}
+                            {selectedNode.percentile.toFixed(1)}%
+                        </div>
+                    )}
+
+                    {selectedNode.publishedDate && selectedNode.publishedDate.length > 4 && (
+                        <div
+                            style={{
+                                fontSize: 10,
+                                color: t.textFaint,
+                                marginBottom: 8,
+                                lineHeight: 1.4,
+                            }}
+                        >
+                            <strong>Published:</strong> {selectedNode.publishedDate}
+                        </div>
+                    )}
+
+                    {selectedNode.abstract && (
+                        <div
+                            style={{
+                                fontSize: 10,
+                                color: t.textMuted,
+                                marginBottom: 12,
+                                lineHeight: 1.5,
+                                fontStyle: "italic",
+                                borderLeft: `2px solid ${selectedNode.color}66`,
+                                paddingLeft: 8,
+                            }}
+                        >
+                            {selectedNode.abstract.length > 250
+                                ? selectedNode.abstract.slice(0, 250) + "…"
+                                : selectedNode.abstract}
+                        </div>
+                    )}
+
+                    {selectedNode.openAlexId && (
+                        <a
+                            href={
+                                selectedNode.openAlexId.startsWith("http")
+                                    ? selectedNode.openAlexId
+                                    : `https://openalex.org/${selectedNode.openAlexId}`
+                            }
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                                display: "inline-block",
+                                fontSize: 11,
+                                color: t.accent,
+                                textDecoration: "none",
+                                borderBottom: `1px solid ${t.accent}88`,
+                                paddingBottom: 2,
+                                marginBottom: 12,
+                            }}
+                        >
+                            OpenAlex Report ↗
+                        </a>
+                    )}
+
+                    {selectedNode.doi && (
+                        <a
+                            href={selectedNode.doi}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            style={{
+                                display: "inline-block",
+                                fontSize: 11,
+                                color: selectedNode.color,
+                                textDecoration: "none",
+                                borderBottom: `1px dashed ${selectedNode.color}88`,
+                                paddingBottom: 2,
+                                marginBottom: 12,
+                                marginRight: 12,
+                            }}
+                        >
+                            View Source ↗
+                        </a>
+                    )}
+
+                    <div style={{ display: "flex", gap: 10, marginTop: 4 }}>
                         <button
                             onClick={() => setSelectedNode(null)}
                             style={{
@@ -1581,6 +1850,130 @@ export default function PaperGraph() {
                             </button>
                         )}
                     </div>
+                    <br />
+
+                    {/* In-Degree / Out-Degree stats */}
+                    {adjacencyList.get(selectedNode.id)?.size ? (
+                        <>
+                            <div
+                                style={{
+                                    fontSize: 10,
+                                    color: t.textFaint,
+                                    marginBottom: 12,
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                }}
+                            >
+                                <span style={{ color: selectedNode.color, fontWeight: "bold" }}>
+                                    {adjacencyList.get(selectedNode.id)?.size}
+                                </span>{" "}
+                                Connected{" "}
+                                {adjacencyList.get(selectedNode.id)?.size === 1 ? "Node" : "Nodes"}
+                            </div>
+
+                            <div
+                                style={{
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: 8,
+                                    paddingRight: 4,
+                                    marginBottom: 16,
+                                }}
+                            >
+                                {Array.from(adjacencyList.get(selectedNode.id) || []).map(
+                                    (connId) => {
+                                        const connNode = graphData.nodes.find(
+                                            (n) => n.id === connId,
+                                        );
+                                        if (!connNode) return null;
+                                        return (
+                                            <div
+                                                key={connId}
+                                                style={{
+                                                    background: "rgba(0,0,0,0.2)",
+                                                    padding: 8,
+                                                    borderRadius: 6,
+                                                    border: `1px solid ${t.divider}`,
+                                                }}
+                                            >
+                                                <div
+                                                    style={{
+                                                        fontSize: 11,
+                                                        color: connNode.color,
+                                                        fontWeight: "bold",
+                                                        marginBottom: 6,
+                                                        lineHeight: 1.3,
+                                                    }}
+                                                >
+                                                    {connNode.title}
+                                                </div>
+                                                <div
+                                                    style={{
+                                                        display: "flex",
+                                                        gap: 8,
+                                                        alignItems: "center",
+                                                    }}
+                                                >
+                                                    <button
+                                                        onClick={() => setSelectedNode(connNode)}
+                                                        style={{
+                                                            padding: "4px 8px",
+                                                            borderRadius: 4,
+                                                            background: `${connNode.color}22`,
+                                                            border: `1px solid ${connNode.color}55`,
+                                                            color: connNode.color,
+                                                            fontSize: 9,
+                                                            cursor: "pointer",
+                                                            fontWeight: 600,
+                                                        }}
+                                                    >
+                                                        Select Node
+                                                    </button>
+                                                    {connNode.doi && (
+                                                        <a
+                                                            href={connNode.doi}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            style={{
+                                                                fontSize: 9,
+                                                                color: t.textMuted,
+                                                                textDecoration: "none",
+                                                                borderBottom: `1px dashed ${t.textMuted}`,
+                                                            }}
+                                                        >
+                                                            View Paper ↗
+                                                        </a>
+                                                    )}
+                                                    {connNode.openAlexId && (
+                                                        <a
+                                                            href={
+                                                                connNode.openAlexId.startsWith(
+                                                                    "http",
+                                                                )
+                                                                    ? connNode.openAlexId
+                                                                    : `https://openalex.org/${connNode.openAlexId}`
+                                                            }
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            style={{
+                                                                fontSize: 9,
+                                                                color: t.accent,
+                                                                textDecoration: "none",
+                                                                borderBottom: `1px solid ${t.accent}88`,
+                                                            }}
+                                                        >
+                                                            OpenAlex ↗
+                                                        </a>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        );
+                                    },
+                                )}
+                            </div>
+                        </>
+                    ) : null}
                 </div>
             )}
 
