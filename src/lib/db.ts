@@ -1,10 +1,15 @@
-import { MongoClient, Db } from "mongodb";
+import { MongoClient, Db, MongoClientOptions } from "mongodb";
 
 const uri = process.env.MONGODB_URI as string;
 
 if (!uri) {
     throw new Error("Please define MONGODB_URI in your environment variables");
 }
+
+const options: MongoClientOptions = {
+    tls: true,
+    tlsAllowInvalidCertificates: true,
+};
 
 let client: MongoClient;
 let clientPromise: Promise<MongoClient>;
@@ -15,12 +20,12 @@ declare global {
 
 if (process.env.NODE_ENV === "development") {
     if (!global._mongoClientPromise) {
-        client = new MongoClient(uri);
+        client = new MongoClient(uri, options);
         global._mongoClientPromise = client.connect();
     }
     clientPromise = global._mongoClientPromise;
 } else {
-    client = new MongoClient(uri);
+    client = new MongoClient(uri, options);
     clientPromise = client.connect();
 }
 

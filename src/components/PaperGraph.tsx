@@ -3,7 +3,11 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
 import dynamic from "next/dynamic";
 import AuthButtons from "../app/components/AuthButtons";
+import AiChatPanel from "../app/components/AiChatPanel";
+import SavedPapersPanel from "../app/components/SavedPapersPanel";
 import { useTheme } from "../app/components/ThemeProvider";
+import { useSession } from "next-auth/react";
+import { HiBookmark } from "react-icons/hi";
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
     ssr: false,
     loading: () => (
@@ -426,9 +430,9 @@ async function fetchNeo4jGraph(
     minCitations: number,
 ): Promise<GraphData> {
     const params = new URLSearchParams({
-        keyword: query,
         limit: String(maxNodes),
     });
+    if (query.trim()) params.set("keyword", query.trim());
     if (minYear > 0) params.set("publication_year_start", String(minYear));
     const res = await fetch(`/api/graph?${params}`);
     if (!res.ok) {
@@ -648,14 +652,6 @@ function StarField({ width, height }: StarFieldProps) {
             ctx.fillRect(0, 0, width, height);
             ctx.drawImage(offscreen, 0, 0);
 
-            layers.forEach((s) => {
-                const a = (Math.sin(s.phase + t * s.spd * 60) * 0.35 + 0.65) * s.maxA;
-                ctx.beginPath();
-                ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-                ctx.fillStyle = `rgba(${s.cr},${s.cg},${s.cb},${a.toFixed(2)})`;
-                ctx.fill();
-            });
-
             shooters.forEach((s) => {
                 if (!s.active) {
                     s.nextAt--;
@@ -778,11 +774,15 @@ export default function PaperGraph() {
     );
     const [graphData, setGraphData] = useState<GraphData>({ nodes: [], links: [] });
     const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+    const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [fieldsPresent, setFieldsPresent] = useState<string[]>([]);
-    const [maxNodes, setMaxNodes] = useState(20);
+    const [maxNodes, setMaxNodes] = useState(50);
     const [minYear, setMinYear] = useState(2010);
     const [minCitations, setMinCitations] = useState(0);
+    const [aiOpen, setAiOpen] = useState(false);
+    const [savedOpen, setSavedOpen] = useState(false);
+    const { data: session } = useSession();
 
     // Set real window size on mount (avoids SSR mismatch)
     useEffect(() => {
@@ -873,10 +873,31 @@ export default function PaperGraph() {
         setHoveredNode((node as GraphNode) || null);
     }, []);
 
+    const onNodeClick = useCallback((node: object) => {
+        setSelectedNode(node as GraphNode);
+    }, []);
+
+    const handleSavePaper = async () => {
+        if (!selectedNode || !session?.user) return;
+        try {
+            const res = await fetch("/api/papers", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ paperId: selectedNode.id, title: selectedNode.title }),
+            });
+            if (res.ok) {
+                setSavedOpen(true);
+            }
+        } catch (err) {
+            console.error("Failed to save paper", err);
+        }
+    };
+
     const runSearch = useCallback(async () => {
-        if (!query.trim() || loading) return;
+        if (loading) return;
         setLoading(true);
-        setStatus("Scanning the cosmos…");
+        setSelectedNode(null);
+        setStatus(query.trim() ? "Scanning the cosmos…" : "Loading papers…");
         setGraphData({ nodes: [], links: [] });
         try {
             const data = await fetchGraph(query, maxNodes, minYear, minCitations);
@@ -899,6 +920,12 @@ export default function PaperGraph() {
             setLoading(false);
         }
     }, [query, maxNodes, minYear, minCitations, loading]);
+
+    // Auto-load papers on mount
+    useEffect(() => {
+        runSearch();
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
     // ── Canvas draw callbacks ───────────────────────────────────────────────
     const drawNode = useCallback(
@@ -995,8 +1022,8 @@ export default function PaperGraph() {
 
     // ── Slider config ───────────────────────────────────────────────────────
     const sliders = [
-        { label: "Max Nodes", val: maxNodes, set: setMaxNodes, min: 5, max: 150, step: 1 },
-        { label: "Min Year", val: minYear, set: setMinYear, min: 1990, max: 2024, step: 1 },
+        { label: "Max Nodes", val: maxNodes, set: setMaxNodes, min: 1, max: 5000, step: 1 },
+        { label: "Min Year", val: minYear, set: setMinYear, min: 1900, max: 2024, step: 1 },
         {
             label: "Min Citations",
             val: minCitations,
@@ -1022,8 +1049,68 @@ export default function PaperGraph() {
         >
             {isDark && <StarField width={dims.w} height={dims.h} />}
 
-            {/* Auth buttons */}
-            <div style={{ position: "absolute", top: 16, right: 16, zIndex: 20 }}>
+            {/* Header Icons */}
+            <div
+                style={{
+                    position: "absolute",
+                    top: 16,
+                    right: 16,
+                    zIndex: 20,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                }}
+            >
+                {session?.user && (
+                    <button
+                        onClick={() => setSavedOpen(!savedOpen)}
+                        title="Saved Papers"
+                        style={{
+                            padding: "6px 10px",
+                            borderRadius: 8,
+                            border: `1px solid ${isDark ? "rgba(79,195,247,0.3)" : "rgba(2,132,199,0.25)"}`,
+                            background: savedOpen
+                                ? isDark
+                                    ? "rgba(79,195,247,0.2)"
+                                    : "rgba(2,132,199,0.15)"
+                                : isDark
+                                  ? "rgba(79,195,247,0.08)"
+                                  : "rgba(2,132,199,0.05)",
+                            color: isDark ? "#4fc3f7" : "#0284c7",
+                            cursor: "pointer",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 5,
+                        }}
+                    >
+                        <HiBookmark size={15} />
+                    </button>
+                )}
+                <button
+                    onClick={() => setAiOpen(!aiOpen)}
+                    title="AI Analyst"
+                    style={{
+                        padding: "6px 10px",
+                        borderRadius: 8,
+                        border: `1px solid ${isDark ? "rgba(79,195,247,0.3)" : "rgba(2,132,199,0.25)"}`,
+                        background: aiOpen
+                            ? isDark
+                                ? "rgba(79,195,247,0.2)"
+                                : "rgba(2,132,199,0.15)"
+                            : isDark
+                              ? "rgba(79,195,247,0.08)"
+                              : "rgba(2,132,199,0.05)",
+                        color: isDark ? "#4fc3f7" : "#0284c7",
+                        cursor: "pointer",
+                        fontFamily: '"Orbitron", monospace',
+                        fontSize: 13,
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 5,
+                    }}
+                >
+                    ✦ AI
+                </button>
                 <AuthButtons />
             </div>
 
@@ -1037,6 +1124,7 @@ export default function PaperGraph() {
                     nodeCanvasObject={drawNode}
                     nodeCanvasObjectMode={() => "replace"}
                     nodePointerAreaPaint={paintNodePointerArea}
+                    onNodeClick={onNodeClick}
                     linkCanvasObject={drawLink}
                     linkCanvasObjectMode={() => "replace"}
                     onNodeHover={onNodeHover}
@@ -1410,6 +1498,96 @@ export default function PaperGraph() {
                     ))}
                 </div>
             )}
+
+            {/* Selected Node Panel */}
+            {selectedNode && (
+                <div
+                    style={{
+                        position: "absolute",
+                        bottom: 20,
+                        left: 20,
+                        background: t.tooltipBg,
+                        border: `1px solid ${selectedNode.color}66`,
+                        borderRadius: 12,
+                        padding: "16px",
+                        maxWidth: 320,
+                        zIndex: 20,
+                        boxShadow: `0 8px 32px rgba(0,0,0,0.5), 0 0 24px ${selectedNode.color}33`,
+                        fontFamily: '"Space Mono", monospace',
+                        backdropFilter: "blur(12px)",
+                    }}
+                >
+                    <div
+                        style={{
+                            fontSize: 13,
+                            fontWeight: 700,
+                            color: selectedNode.color,
+                            marginBottom: 8,
+                            lineHeight: 1.4,
+                            textShadow: `0 0 12px ${selectedNode.color}88`,
+                        }}
+                    >
+                        {selectedNode.title}
+                    </div>
+                    <div style={{ fontSize: 11, color: t.textMuted, marginBottom: 12 }}>
+                        {selectedNode.year ? `📅 ${selectedNode.year}` : ""}
+                        {selectedNode.citations
+                            ? `  ·  ✦ ${selectedNode.citations.toLocaleString()} citations`
+                            : ""}
+                    </div>
+                    <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                        <button
+                            onClick={() => setSelectedNode(null)}
+                            style={{
+                                padding: "6px 12px",
+                                borderRadius: 6,
+                                background: "transparent",
+                                border: `1px solid ${t.tooltipBorder}`,
+                                color: t.textMuted,
+                                fontSize: 11,
+                                cursor: "pointer",
+                            }}
+                        >
+                            Close
+                        </button>
+                        {session?.user && (
+                            <button
+                                onClick={handleSavePaper}
+                                style={{
+                                    padding: "6px 12px",
+                                    borderRadius: 6,
+                                    background: `${selectedNode.color}22`,
+                                    border: `1px solid ${selectedNode.color}66`,
+                                    color: selectedNode.color,
+                                    fontSize: 11,
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: 6,
+                                }}
+                            >
+                                <HiBookmark size={14} />
+                                Save Paper
+                            </button>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {/* AI Chat Panel */}
+            <AiChatPanel
+                open={aiOpen}
+                onClose={() => setAiOpen(false)}
+                graphContext={{
+                    nodes: graphData.nodes,
+                    links: graphData.links,
+                    fields: fieldsPresent,
+                }}
+            />
+
+            {/* Saved Papers Panel */}
+            <SavedPapersPanel open={savedOpen} onClose={() => setSavedOpen(false)} />
         </div>
     );
 }
