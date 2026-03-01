@@ -436,35 +436,7 @@ async function fetchGraph(
     authorFilter: string,
     fieldFilter: string,
 ): Promise<GraphData> {
-    return USE_MOCK
-        ? fetchMockGraph(query, maxNodes, minYear, minCitations)
-        : fetchNeo4jGraph(query, maxNodes, minYear, minCitations, authorFilter, fieldFilter);
-}
-
-async function fetchMockGraph(
-    query: string,
-    maxNodes: number,
-    minYear: number,
-    minCitations: number,
-): Promise<GraphData> {
-    await new Promise((r) => setTimeout(r, 600));
-    const q = query.toLowerCase().trim();
-
-    const scored = MOCK_PAPERS.map((p) => {
-        let score = 0;
-        if (p.title.toLowerCase().includes(q)) score += 3;
-        if (p.fieldsOfStudy.some((f) => f.toLowerCase().includes(q))) score += 2;
-        if (p.abstract.toLowerCase().includes(q)) score += 1;
-        return { ...p, _score: score };
-    });
-
-    const primaries = scored
-        .filter((p) => p._score! > 0)
-        .filter((p) => (!p.year || p.year >= minYear) && p.citationCount >= minCitations)
-        .sort((a, b) => b._score! - a._score! || b.citationCount - a.citationCount)
-        .slice(0, maxNodes);
-
-    return buildGraph(primaries, MOCK_REFS, MOCK_PAPERS);
+    return fetchNeo4jGraph(query, maxNodes, minYear, minCitations, authorFilter, fieldFilter);
 }
 
 async function fetchNeo4jGraph(
