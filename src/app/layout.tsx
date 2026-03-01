@@ -2,6 +2,10 @@ import type { Metadata } from "next";
 import "./globals.css";
 import Providers from "./components/Providers";
 import ThemeProvider from "./components/ThemeProvider";
+import { ensureIndexes } from "../lib/db";
+
+//run on startup
+ensureIndexes().catch(console.error);
 
 export const metadata: Metadata = {
     title: "Stellar Papers",

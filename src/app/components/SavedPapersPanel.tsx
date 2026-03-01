@@ -27,9 +27,9 @@ export default function SavedPapersPanel({ open, onClose }: SavedPapersPanelProp
         if (!session?.user) return;
         setLoading(true);
         try {
-            const res = await fetch("/api/papers");
+            const res = await fetch("/api/saved");
             const data = await res.json();
-            setPapers(data.papers || []);
+            setPapers(data.saved || []);
         } catch (err) {
             console.error("Failed to fetch saved papers:", err);
         }
@@ -42,10 +42,8 @@ export default function SavedPapersPanel({ open, onClose }: SavedPapersPanelProp
 
     const removePaper = async (paperId: string) => {
         try {
-            await fetch("/api/papers", {
+            await fetch(`/api/saved/${encodeURIComponent(paperId)}`, {
                 method: "DELETE",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ paperId }),
             });
             setPapers((prev) => prev.filter((p) => p.paperId !== paperId));
         } catch (err) {

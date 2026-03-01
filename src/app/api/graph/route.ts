@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
             ? parseInt(searchParams.get("publication_year_end")!)
             : undefined,
         institution: searchParams.get("institution") ?? undefined,
-        domain: searchParams.get("domain") ?? undefined,
+        field: searchParams.get("field") ?? undefined,
         keyword: searchParams.get("keyword") ?? undefined,
         limit: searchParams.get("limit") ? parseInt(searchParams.get("limit")!) : 100,
     };
@@ -39,9 +39,9 @@ export async function GET(req: NextRequest) {
             conditions.push("p.publication_year <= $publication_year_end");
             params.publication_year_end = filters.publication_year_end;
         }
-        if (filters.domain) {
-            conditions.push("toLower(p.domain) CONTAINS toLower($domain)");
-            params.domain = filters.domain;
+        if (filters.field) {
+            conditions.push("toLower(p.field) CONTAINS toLower($field)");
+            params.field = filters.field;
         }
         if (filters.keyword) {
             conditions.push("ANY(k IN p.keywords WHERE toLower(k) CONTAINS toLower($keyword))");

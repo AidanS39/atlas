@@ -40,7 +40,7 @@ export async function POST(req: NextRequest) {
 
     try {
         const body = await req.json();
-        const { paperId, title, domain, publication_year, cited_by_count, open_alex_id } = body;
+        const { paperId, title, field, publication_year, cited_by_count, open_alex_id } = body;
 
         if (!paperId) {
             return NextResponse.json({ error: "Missing paperId" }, { status: 400 });
@@ -58,17 +58,17 @@ export async function POST(req: NextRequest) {
         }
 
         const doc = {
-            userId: session.user.Id,
+            userId: session.user.id,
             paperId,
             title: title ?? null,
-            domain: domain ?? null,
+            field: field ?? null,
             publication_year: publication_year ?? null,
             cited_by_count: cited_by_count ?? null,
             open_alex_id: open_alex_id ?? null,
             savedAt: new Date(),
         };
 
-        await db.collection("saved_paper").insertOne(doc);
+        await db.collection("saved_papers").insertOne(doc);
 
         return NextResponse.json({ success: true, saved: doc }, { status: 201 });
     } catch (error) {

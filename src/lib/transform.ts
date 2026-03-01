@@ -12,7 +12,7 @@ export function toNode(properties: any): PaperNode {
             publication_year: p.publication_year ? p.publication_year.toNumber() : null,
             publication_date: p.publication_date ?? null,
             institution: p.institution ?? null,
-            domain: p.domain ?? null,
+            field: p.field ?? null,
             cited_by_count: p.cited_by_count ? p.cited_by_count.toNumber() : null,
             citation_normalized_percentile: p.citation_normalized_percentile ?? null,
             referenced_works_count: p.referenced_works_count

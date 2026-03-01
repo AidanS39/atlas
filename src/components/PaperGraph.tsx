@@ -880,10 +880,17 @@ export default function PaperGraph() {
     const handleSavePaper = async () => {
         if (!selectedNode || !session?.user) return;
         try {
-            const res = await fetch("/api/papers", {
+            const res = await fetch("/api/saved", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ paperId: selectedNode.id, title: selectedNode.title }),
+                body: JSON.stringify({
+                    paperId: selectedNode.id,
+                    title: selectedNode.title,
+                    field: selectedNode.fields?.[0] ?? null,
+                    publication_year: selectedNode.year ?? null,
+                    cited_by_count: selectedNode.citations ?? null,
+                    open_alex_id: selectedNode.id ?? null,
+                }),
             });
             if (res.ok) {
                 setSavedOpen(true);
