@@ -134,7 +134,7 @@ export default function SignUpForm() {
     }, []);
 
     return (
-        <div className="flex flex-col items-center pt-8 h-full overflow-y-auto pb-8">
+        <div className="flex flex-col items-center pt-8 h-full overflow-y-auto pb-8 bg-white dark:bg-gray-950 min-h-screen">
             <div className="w-full max-w-md flex items-center justify-between mb-4 px-2">
                 <Link
                     href="/"
@@ -145,7 +145,9 @@ export default function SignUpForm() {
                 <ThemeToggle />
             </div>
             <div className="max-w-md w-full p-8 border-2 border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 rounded-2xl h-fit">
-                <h1 className={`text-2xl font-bold text-center ${error ? "mb-3" : "mb-8"}`}>
+                <h1
+                    className={`text-2xl font-bold text-center text-gray-900 dark:text-white ${error ? "mb-3" : "mb-8"}`}
+                >
                     Sign Up
                 </h1>
 
@@ -161,7 +163,7 @@ export default function SignUpForm() {
                         name="username"
                         type="text"
                         placeholder="Username"
-                        className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300 dark:focus:border-blue-700 dark:focus:ring-blue-600"
+                        className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:focus:border-blue-700 dark:focus:ring-blue-600"
                         required
                     />
 
@@ -169,7 +171,7 @@ export default function SignUpForm() {
                         name="email"
                         type="email"
                         placeholder="Email Address"
-                        className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300 dark:focus:border-blue-700 dark:focus:ring-blue-600"
+                        className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:focus:border-blue-700 dark:focus:ring-blue-600"
                         required
                         autoComplete="email"
                     />
@@ -181,7 +183,7 @@ export default function SignUpForm() {
                             placeholder="Password"
                             value={password}
                             onChange={(e) => setPassword(e.target.value)}
-                            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300 dark:focus:border-blue-700 dark:focus:ring-blue-600"
+                            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:focus:border-blue-700 dark:focus:ring-blue-600"
                             required
                         />
                         <button
@@ -203,7 +205,9 @@ export default function SignUpForm() {
                                         style={{ width: `${strengthPercent}%` }}
                                     />
                                 </div>
-                                <span className="text-xs font-medium w-10">{strengthLabel}</span>
+                                <span className="text-xs font-medium w-10 text-gray-700 dark:text-gray-300">
+                                    {strengthLabel}
+                                </span>
                             </div>
                             <ul className="space-y-1">
                                 {pwRequirements.map((r) => (
@@ -228,7 +232,7 @@ export default function SignUpForm() {
                             name="confirmPassword"
                             type={confirmPasswordVisible ? "text" : "password"}
                             placeholder="Confirm Password"
-                            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300 dark:focus:border-blue-700 dark:focus:ring-blue-600"
+                            className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300 dark:bg-gray-800 dark:text-white dark:border-gray-600 dark:focus:border-blue-700 dark:focus:ring-blue-600"
                             required
                         />
                         <button
@@ -244,13 +248,13 @@ export default function SignUpForm() {
                     <button
                         type="submit"
                         disabled={submitting}
-                        className={`w-full py-2 rounded ${submitting ? "cursor-not-allowed bg-zinc-200 dark:bg-zinc-800" : "bg-blue-500 hover:cursor-pointer text-white hover:bg-blue-600"}`}
+                        className={`w-full py-2 rounded ${submitting ? "cursor-not-allowed bg-zinc-200 dark:bg-zinc-800 text-gray-500 dark:text-gray-400" : "bg-blue-500 hover:cursor-pointer text-white hover:bg-blue-600"}`}
                     >
                         {submitting ? "Signing Up..." : "Sign Up"}
                     </button>
                 </form>
 
-                <p className="pt-4 text-center text-zinc-500">
+                <p className="pt-4 text-center text-zinc-500 dark:text-zinc-400">
                     Already have an account?{" "}
                     <Link
                         href="/signin"
@@ -259,12 +263,14 @@ export default function SignUpForm() {
                         Sign in
                     </Link>
                 </p>
-                <p className="pt-4 text-center">Or you can sign up with:</p>
+                <p className="pt-4 text-center text-gray-700 dark:text-gray-300">
+                    Or you can sign up with:
+                </p>
                 <div className="pt-4">
                     <button
                         type="button"
                         onClick={() => signIn("google", { callbackUrl: "/" })}
-                        className="w-full flex items-center justify-center gap-2 border rounded py-2 hover:cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                        className="w-full flex items-center justify-center gap-2 border border-gray-200 dark:border-gray-600 rounded py-2 hover:cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900 text-gray-700 dark:text-white"
                     >
                         <span className="w-5 h-5">
                             <svg
@@ -296,7 +302,7 @@ export default function SignUpForm() {
                     <button
                         type="button"
                         onClick={() => signIn("github", { callbackUrl: "/" })}
-                        className="w-full flex items-center justify-center gap-2 border rounded py-2 hover:cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900 mt-3"
+                        className="w-full flex items-center justify-center gap-2 border border-gray-200 dark:border-gray-600 rounded py-2 hover:cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900 mt-3 text-gray-700 dark:text-white"
                     >
                         <span className="w-5 h-5">
                             <svg viewBox="0 0 24 24" className="w-5 h-5 fill-current">
