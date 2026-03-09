@@ -542,8 +542,8 @@ export default function PaperGraph() {
     const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
     const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
     const [fieldsPresent, setFieldsPresent] = useState<string[]>([]);
-    const [maxNodes, setMaxNodes] = useState(50);
-    const [minYear, setMinYear] = useState(1980);
+    const [maxNodes, setMaxNodes] = useState(250);
+    const [minYear, setMinYear] = useState(1800);
     const [maxYear, setMaxYear] = useState(new Date().getFullYear());
     const [minCitations, setMinCitations] = useState(0);
     const [authorFilter, setAuthorFilter] = useState("");
@@ -806,7 +806,7 @@ export default function PaperGraph() {
             label: "Min Year",
             val: minYear,
             set: setMinYear,
-            min: 1900,
+            min: 1800,
             max: new Date().getFullYear(),
             step: 1,
         },
