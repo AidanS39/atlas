@@ -571,12 +571,11 @@ export default function PaperGraph() {
         const REPEL_RADIUS = 100;
 
         function colorClusterForce(alpha: number) {
-            const nodes = graphData.nodes as Array<GraphNode & { vx?: number; vy?: number; fx?: number; fy?: number }>;
+            const nodes = graphData.nodes as Array<GraphNode & { vx?: number; vy?: number }>;
             for (let i = 0; i < nodes.length; i++) {
                 for (let j = i + 1; j < nodes.length; j++) {
                     const a = nodes[i];
                     const b = nodes[j];
-                    if (a.fx != null || b.fx != null) continue;
                     if (a.x == null || a.y == null || b.x == null || b.y == null) continue;
 
                     const dx = b.x - a.x || 0.001;
@@ -621,7 +620,7 @@ export default function PaperGraph() {
         }
 
         fgRef.current.d3Force("color-clustering", colorClusterForce);
-
+        fgRef.current.d3Force("charge", null);
         fgRef.current.d3Force("collision", null);
 
         fgRef.current.d3ReheatSimulation();
@@ -636,31 +635,12 @@ export default function PaperGraph() {
         setHoveredNode((node as GraphNode) || null);
     }, []);
 
-    const DRAG_INFLUENCE_RADIUS = 150;
-
-    const onNodeDrag = useCallback((node: object) => {
-        const dragged = node as GraphNode & { fx?: number; fy?: number };
-        if (dragged.x == null || dragged.y == null) return;
-        (graphData.nodes as Array<GraphNode & { fx?: number; fy?: number }>).forEach(n => {
-            if (n.id === dragged.id) return;
-            if (n.x == null || n.y == null) return;
-            const dx = n.x - dragged.x!;
-            const dy = n.y - dragged.y!;
-            const dist = Math.sqrt(dx * dx + dy * dy);
-            if (dist > DRAG_INFLUENCE_RADIUS) {
-                n.fx = n.x;
-                n.fy = n.y;
-            } else {
-                n.fx = undefined;
-                n.fy = undefined;
-            }
-        });
-    }, [graphData.nodes]);
+    const onNodeDrag = useCallback(() => {}, []);
 
     const onNodeDragEnd = useCallback(() => {
-        (graphData.nodes as Array<GraphNode & { fx?: number; fy?: number }>).forEach(n => {
-            n.fx = undefined;
-            n.fy = undefined;
+        (graphData.nodes as Array<GraphNode & { vx?: number; vy?: number }>).forEach(n => {
+            n.vx = 0;
+            n.vy = 0;
         });
     }, [graphData.nodes]);
 
