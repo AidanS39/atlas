@@ -636,6 +636,34 @@ export default function PaperGraph() {
         setHoveredNode((node as GraphNode) || null);
     }, []);
 
+    const DRAG_INFLUENCE_RADIUS = 150;
+
+    const onNodeDrag = useCallback((node: object) => {
+        const dragged = node as GraphNode & { fx?: number; fy?: number };
+        if (dragged.x == null || dragged.y == null) return;
+        (graphData.nodes as Array<GraphNode & { fx?: number; fy?: number }>).forEach(n => {
+            if (n.id === dragged.id) return;
+            if (n.x == null || n.y == null) return;
+            const dx = n.x - dragged.x!;
+            const dy = n.y - dragged.y!;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            if (dist > DRAG_INFLUENCE_RADIUS) {
+                n.fx = n.x;
+                n.fy = n.y;
+            } else {
+                n.fx = undefined;
+                n.fy = undefined;
+            }
+        });
+    }, [graphData.nodes]);
+
+    const onNodeDragEnd = useCallback(() => {
+        (graphData.nodes as Array<GraphNode & { fx?: number; fy?: number }>).forEach(n => {
+            n.fx = undefined;
+            n.fy = undefined;
+        });
+    }, [graphData.nodes]);
+
     const onNodeClick = useCallback((node: object) => {
         setSelectedNode(node as GraphNode);
     }, []);
@@ -959,6 +987,8 @@ export default function PaperGraph() {
                     d3AlphaDecay={0.025}
                     d3VelocityDecay={0.35}
                     enableNodeDrag
+                    onNodeDrag={onNodeDrag}
+                    onNodeDragEnd={onNodeDragEnd}
                     enableZoomInteraction
                     onRenderFramePost={(ctx, globalScale) => {
                         if (selectedNode && selectedNode.x != null && selectedNode.y != null) {
